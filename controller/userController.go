@@ -18,7 +18,7 @@ type AuthResp struct {
 
 type UserInfoResp struct {
 	response
-	User service.UserInfo `json:"user"`
+	User service.UserInfo `json:"user_info"`
 }
 
 type UserController struct {
@@ -80,9 +80,18 @@ func (ctl *UserController) Login(ctx *gin.Context) {
 	})
 }
 func (ctl *UserController) GetUserInfo(ctx *gin.Context) {
-	author_id, _ := strconv.Atoi(ctx.Query("user_id"))
-	user_id := ctx.GetInt("user_id")
-	info, err := ctl.userSrv.GetInfo(int64(author_id), int64(user_id))
+	var userId, authorId int64
+	var err error
+	userId = ctx.GetInt64("user_id")
+	authorIdStr := ctx.Query("user_id")
+	if authorIdStr == "" {
+		authorId = userId
+	} else {
+		authorId, err = strconv.ParseInt(authorIdStr, 10, 64)
+	}
+
+	var info service.UserInfo
+	info, err = ctl.userSrv.GetInfo(authorId, userId)
 	if err != nil {
 		ue := util.ConvertOrLog(err)
 		ctx.JSON(http.StatusOK, AuthResp{

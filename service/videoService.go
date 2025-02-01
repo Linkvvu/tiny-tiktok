@@ -4,28 +4,30 @@ import (
 	"io"
 	"sync"
 	"tiktok/dao"
+	"time"
 )
 
 type VideoInfo struct {
-	Id          int64    `json:"id"`
-	Author      UserInfo `json:"author"`
-	PlayUrl     string   `json:"play_url"`
-	CoverUrl    string   `json:"cover_url"`
-	Title       string   `json:"title"`
-	FavoriteCnt uint64   `json:"favorite_count"`
-	CommentCnt  uint64   `json:"comment_count"`
-	IsFavorite  bool     `json:"is_favorite"`
+	Id         int64    `json:"id"`
+	Author     UserInfo `json:"author"`
+	PlayUrl    string   `json:"play_url"`
+	CoverUrl   string   `json:"cover_url"`
+	Title      string   `json:"title"`
+	LikeCnt    uint64   `json:"like_count"`
+	CommentCnt uint64   `json:"comment_count"`
+	IsLike     bool     `json:"is_like"`
+	PublishAt  string   `json:"publish_at"`
 }
 
 type VideoService interface {
 	Publish(user_id int, title string, data io.Reader) error
 	List(author_id, user_id int64) ([]VideoInfo, error)
-	Recommend(user_id int64) ([]VideoInfo, error)
+	Recommend(user_id int64, latest_time *time.Time) ([]VideoInfo, error)
 	Destroy() error
 }
 
 func BuildVideoInfo(like_srv LikeService, video dao.Video, cur_user_id int64) VideoInfo {
-	var is_favorite bool
+	var is_like bool
 	var author dao.User
 	var like_count uint64
 
@@ -38,7 +40,7 @@ func BuildVideoInfo(like_srv LikeService, video dao.Video, cur_user_id int64) Vi
 	}()
 
 	go func() {
-		is_favorite, _ = like_srv.IsFavorite(video.Id, cur_user_id)
+		is_like, _ = like_srv.HasUserLiked(video.Id, cur_user_id)
 		defer grp.Done()
 	}()
 
@@ -50,13 +52,14 @@ func BuildVideoInfo(like_srv LikeService, video dao.Video, cur_user_id int64) Vi
 	grp.Wait()
 
 	return VideoInfo{
-		Id:          video.Id,
-		Author:      BuildUserInfo(author, cur_user_id),
-		PlayUrl:     video.PlayUrl,
-		CoverUrl:    video.CoverUrl,
-		Title:       video.Title,
-		FavoriteCnt: like_count,
-		CommentCnt:  100000,
-		IsFavorite:  is_favorite,
+		Id:         video.Id,
+		Author:     BuildUserInfo(author, cur_user_id),
+		PlayUrl:    video.PlayUrl,
+		CoverUrl:   video.CoverUrl,
+		Title:      video.Title,
+		LikeCnt:    like_count,
+		CommentCnt: 100000,
+		IsLike:     is_like,
+		PublishAt:  video.PublishAt.String(),
 	}
 }

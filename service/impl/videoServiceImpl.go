@@ -83,9 +83,16 @@ func (s *VideoServiceImpl) List(author_id, user_id int64) ([]service.VideoInfo, 
 	return videos_infos, err
 }
 
-func (s *VideoServiceImpl) Recommend(user_id int64) ([]service.VideoInfo, error) {
+func (s *VideoServiceImpl) Recommend(user_id int64, latest_time *time.Time) ([]service.VideoInfo, error) {
 	videos := []dao.Video{}
-	dao.Db.Limit(5).Find(&videos)
+	if latest_time == nil {
+		latest_time = new(time.Time)
+		*latest_time = time.Now()
+	}
+	dao.Db.Where("publish_at < ?", *latest_time).
+		Order("publish_at DESC").
+		Limit(5).Find(&videos)
+	// todo: check SQL error
 	videos_infos := make([]service.VideoInfo, 0, len(videos))
 	for _, v := range videos {
 		videos_infos = append(videos_infos, service.BuildVideoInfo(s.likeSrv, v, user_id))

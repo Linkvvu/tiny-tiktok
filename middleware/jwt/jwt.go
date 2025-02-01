@@ -48,7 +48,7 @@ func AuthorizationMiddleware(ctx *gin.Context) {
 		return
 	}
 
-	user_id, _ := strconv.Atoi(claim.UserId)
+	user_id, _ := strconv.ParseInt(claim.UserId, 10, 64)
 	ctx.Set("user_id", user_id)
 	ctx.Next()
 }

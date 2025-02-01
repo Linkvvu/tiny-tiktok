@@ -1,10 +1,13 @@
 package main
 
 import (
+	"log"
+
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
+	log.SetFlags(log.Lshortfile | log.LstdFlags)
 	initControllers()
 	defer destroyControllers()
 

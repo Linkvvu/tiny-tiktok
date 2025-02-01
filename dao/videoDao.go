@@ -9,6 +9,7 @@ type Video struct {
 	PlayUrl   string
 	CoverUrl  string
 	PublishAt time.Time
+	LikeCount uint64
 }
 
 func PersistVideo(video *Video) error {
@@ -34,4 +35,8 @@ func GetVideosByAuthor(author_id int64) ([]Video, error) {
 	).Error
 
 	return videos, err
+}
+
+func UpdateLikeCount(video_id int64, count uint64) error {
+	return Db.Model(&Video{}).Where("id = ?", video_id).Update("like_count", count).Error
 }

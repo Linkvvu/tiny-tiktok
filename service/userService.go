@@ -22,7 +22,7 @@ func (i *AuthInfo) Fill(id int64, username, token string) {
 
 type UserInfo struct {
 	Id          int64  `json:"id"`
-	Username    string `json:"name"`
+	Username    string `json:"username"`
 	FollowCnt   uint64 `json:"follow_count"`
 	FollowerCnt uint64 `json:"follower_count"`
 	IsFollow    bool   `json:"is_follow"`

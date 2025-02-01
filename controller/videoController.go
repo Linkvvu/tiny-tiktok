@@ -7,6 +7,7 @@ import (
 	"tiktok/middleware/jwt"
 	"tiktok/service"
 	"tiktok/util"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -80,13 +81,29 @@ func (ctl *VideoController) Feed(ctx *gin.Context) {
 			return
 		}
 
-		id, _ := strconv.Atoi(claim.UserId)
-		user_id = int64(id)
+		id, _ := strconv.ParseInt(claim.UserId, 10, 64)
+		user_id = id
+	}
+	// else the user is tourist
+
+	time_str := ctx.Query("latest_time")
+	var latest_time *time.Time
+	if time_str != "" {
+		log.Println("DateTime:", time_str)
+		time_layout := "2006-01-02 15:04:05 0000 UTC"
+		parsedTime, err := time.Parse(time_layout, time_str)
+		if err != nil {
+			log.Println(err)
+			ctx.JSON(http.StatusBadRequest, NewErrResponse(util.ErrInvalidParam))
+			return
+		}
+		latest_time = &parsedTime
 	}
 
-	video_infos, err := ctl.videoSrv.Recommend(user_id)
+	video_infos, err := ctl.videoSrv.Recommend(user_id, latest_time)
 	if err != nil {
 		ue := util.ConvertOrLog(err)
+		// todo: not http.StatusOK
 		ctx.JSON(http.StatusOK, NewErrResponse(ue))
 		return
 	}

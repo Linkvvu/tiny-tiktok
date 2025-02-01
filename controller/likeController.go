@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"tiktok/service"
@@ -19,16 +20,39 @@ func NewLikeController(like_srv service.LikeService) *LikeController {
 	}
 }
 
+type LikeAction = int
+
+const (
+	CancelAct LikeAction = 0
+	LikeAct   LikeAction = 1
+)
+
 func (ctl *LikeController) Like(ctx *gin.Context) {
-	video_id, _ := strconv.Atoi(ctx.Query("video_id"))
-	action_type, _ := strconv.Atoi(ctx.Query("action_type"))
-	user_id := ctx.GetInt("user_id")
-	err := ctl.likeSrv.DoLike(int64(user_id), int64(video_id), int8(action_type))
+	user_id := ctx.GetInt64("user_id")
+	video_id, _ := strconv.ParseInt(ctx.PostForm("video_id"), 10, 64)
+	action_type, err := strconv.Atoi(ctx.DefaultPostForm("action", "none"))
 	if err != nil {
+		ctx.JSON(http.StatusBadRequest, NewErrResponse(util.ErrInvalidParam))
+		return
+	}
+
+	switch action_type {
+	case LikeAct:
+		err = ctl.likeSrv.DoLike(user_id, video_id)
+	case CancelAct:
+		err = ctl.likeSrv.CancelLike(user_id, video_id)
+	default:
+		ctx.JSON(http.StatusBadRequest, NewErrResponse(util.ErrInvalidParam))
+		return
+	}
+
+	if err != nil {
+		log.Println(err)
 		ue := util.ConvertOrLog(err)
 		ctx.JSON(http.StatusOK, NewErrResponse(ue))
 		return
 	}
+
 	ctx.JSON(http.StatusOK, NewErrResponse(util.ErrOk))
 }
 

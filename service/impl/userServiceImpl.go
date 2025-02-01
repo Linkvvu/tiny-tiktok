@@ -86,8 +86,8 @@ func (s *UserServiceImpl) Login(username, password string) (service.AuthInfo, er
 	return info, nil
 }
 
-func (s *UserServiceImpl) GetInfo(tar_user_id, cur_user_id int64) (service.UserInfo, error) {
-	user_dao, err := dao.GetUserById(tar_user_id)
+func (s *UserServiceImpl) GetInfo(author_id, user_id int64) (service.UserInfo, error) {
+	user_dao, err := dao.GetUserById(author_id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return service.UserInfo{}, util.ErrInvalidParam
@@ -95,6 +95,6 @@ func (s *UserServiceImpl) GetInfo(tar_user_id, cur_user_id int64) (service.UserI
 			return service.UserInfo{}, util.ErrUnknown
 		}
 	}
-	info := service.BuildUserInfo(user_dao, cur_user_id)
+	info := service.BuildUserInfo(user_dao, user_id)
 	return info, nil
 }
