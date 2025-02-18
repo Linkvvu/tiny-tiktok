@@ -3,64 +3,45 @@ package main
 import (
 	"tiktok/controller"
 	"tiktok/middleware/jwt"
-	"tiktok/middleware/rabbitmq"
-	"tiktok/service/impl"
-	"tiktok/util"
+	uSrvImp "tiktok/service/user/impl"
+	vSrvImp "tiktok/service/video/impl"
 
 	"github.com/gin-gonic/gin"
-	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-var rmq_conn *amqp.Connection
-var video_crl *controller.VideoController
-var user_ctl *controller.UserController
-var like_ctl *controller.LikeController
+var videoCrl *controller.VideoController
+var userCtl *controller.UserController
 
-// FIXME:
-//
-//	use video-controller substituting like-controller
 func initControllers() {
-	rmq_conn = rabbitmq.NewRmqConnection(util.AmqpUri)
+	userSrv := uSrvImp.NewUserService()
+	likeSrv := vSrvImp.NewLikeService()
+	commSrv := vSrvImp.NewCommService()
+	videoSrv := vSrvImp.NewVideoService(userSrv, likeSrv, commSrv)
 
-	video_crl = controller.NewVideoController(
-		impl.NewVideoService(
-			rabbitmq.NewCoverQueue(rmq_conn),
-			impl.NewLikeService(),
-		),
-	)
-
-	user_ctl = controller.NewUserController(
-		impl.NewUserService(),
-	)
-
-	like_ctl = controller.NewLikeController(
-		impl.NewLikeService(),
-	)
-}
-
-func destroyControllers() {
-	like_ctl.Destroy()
-	user_ctl.Destroy()
-	video_crl.Destroy()
-	rmq_conn.Close()
+	videoCrl = controller.NewVideoController(videoSrv)
+	userCtl = controller.NewUserController(userSrv)
 }
 
 func setRoutes(eng *gin.Engine) {
-	tiktok_grp := eng.Group("/douyin")
-	tiktok_grp.GET("/feed", video_crl.Feed)
+	tiktok_grp := eng.Group("/tiktok")
+	videoGrp := tiktok_grp.Group("/videos")
+	// no need AuthorizationMiddleware
+	videoGrp.GET("/feed", videoCrl.Feed)
+	videoGrp.GET("/:video_id/comments", videoCrl.ListVideoComments)
 
-	user_grp := tiktok_grp.Group("/user")
-	user_grp.GET("", jwt.AuthorizationMiddleware, user_ctl.GetUserInfo)
-	user_grp.POST("/register", user_ctl.Register)
-	user_grp.POST("/login", user_ctl.Login)
+	// need AuthorizationMiddleware
+	videoGrp.Use(jwt.AuthorizationMiddleware)
+	videoGrp.POST("", videoCrl.Publish)
+	videoGrp.POST("/:video_id/like", videoCrl.Like)
+	videoGrp.DELETE("/:video_id/like", videoCrl.Unlike)
+	videoGrp.POST("/:video_id/comment/:parent_id", videoCrl.DoComment)
+	videoGrp.DELETE("/:video_id/comment/:comment_id", videoCrl.DeleteComment)
 
-	video_grp := tiktok_grp.Group("/publish")
-	video_grp.Use(jwt.AuthorizationMiddleware)
-	video_grp.POST("/action/", video_crl.Publish)
-	video_grp.GET("/list/", video_crl.List)
-
-	like_grp := tiktok_grp.Group("/like_video")
-	like_grp.Use(jwt.AuthorizationMiddleware)
-	like_grp.GET("/list/", like_ctl.List)
-	like_grp.POST("", like_ctl.Like)
+	userGrp := tiktok_grp.Group("/users")
+	userGrp.POST("/register", userCtl.Register)
+	userGrp.POST("/login", userCtl.Login)
+	userGrp.Use(jwt.AuthorizationMiddleware)
+	userGrp.GET("/:user_id/videos", videoCrl.ListUserPubVideos)
+	userGrp.GET("/:user_id/likes", videoCrl.ListUserLikedVideos)
+	userGrp.GET("/me", userCtl.GetUserInfo)
 }

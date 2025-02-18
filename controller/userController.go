@@ -2,9 +2,7 @@ package controller
 
 import (
 	"net/http"
-	"strconv"
-	"tiktok/service"
-	"tiktok/service/impl"
+	uSrv "tiktok/service/user"
 	"tiktok/util"
 
 	"github.com/gin-gonic/gin"
@@ -12,20 +10,20 @@ import (
 
 type AuthResp struct {
 	response
-	UserId int64  `json:"user_id,omitempty"`
+	UserId uint64 `json:"user_id,omitempty"`
 	Token  string `json:"token,omitempty"`
 }
 
 type UserInfoResp struct {
 	response
-	User service.UserInfo `json:"user_info"`
+	User uSrv.UserInfo `json:"user_info"`
 }
 
 type UserController struct {
-	userSrv *impl.UserServiceImpl
+	userSrv uSrv.UserService
 }
 
-func NewUserController(user_srv *impl.UserServiceImpl) *UserController {
+func NewUserController(user_srv uSrv.UserService) *UserController {
 	return &UserController{
 		userSrv: user_srv,
 	}
@@ -33,20 +31,31 @@ func NewUserController(user_srv *impl.UserServiceImpl) *UserController {
 
 func (ctl *UserController) Destroy() {}
 
-func (ctl *UserController) Register(ctx *gin.Context) {
-	username := ctx.Query("username")
-	password := ctx.Query("password")
+type AuthReq struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
 
-	// TODO:
-	//	use validator lib to validate
-	if username == "" || password == "" {
+func (ctl *UserController) Register(ctx *gin.Context) {
+	var registerReq AuthReq
+	err := ctx.ShouldBindJSON(&registerReq)
+	if err != nil {
 		ctx.JSON(http.StatusBadRequest, AuthResp{
 			response: NewErrResponse(util.ErrInvalidParam),
 		})
 		return
 	}
 
-	info, err := ctl.userSrv.Register(username, password)
+	// TODO:
+	//	use validator lib to validate
+	if registerReq.Username == "" || registerReq.Password == "" {
+		ctx.JSON(http.StatusBadRequest, AuthResp{
+			response: NewErrResponse(util.ErrInvalidParam),
+		})
+		return
+	}
+
+	info, err := ctl.userSrv.Register(registerReq.Username, registerReq.Password)
 	if err != nil {
 		ue := util.ConvertOrLog(err)
 		ctx.JSON(http.StatusOK, AuthResp{
@@ -62,10 +71,16 @@ func (ctl *UserController) Register(ctx *gin.Context) {
 }
 
 func (ctl *UserController) Login(ctx *gin.Context) {
-	username := ctx.Query("username")
-	password := ctx.Query("password")
+	var loginReq AuthReq
+	err := ctx.ShouldBindJSON(&loginReq)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, AuthResp{
+			response: NewErrResponse(util.ErrInvalidParam),
+		})
+		return
+	}
 
-	info, err := ctl.userSrv.Login(username, password)
+	info, err := ctl.userSrv.Login(loginReq.Username, loginReq.Password)
 	if err != nil {
 		ue := util.ConvertOrLog(err)
 		ctx.JSON(http.StatusOK, AuthResp{
@@ -79,19 +94,20 @@ func (ctl *UserController) Login(ctx *gin.Context) {
 		Token:    info.Token,
 	})
 }
-func (ctl *UserController) GetUserInfo(ctx *gin.Context) {
-	var userId, authorId int64
-	var err error
-	userId = ctx.GetInt64("user_id")
-	authorIdStr := ctx.Query("user_id")
-	if authorIdStr == "" {
-		authorId = userId
-	} else {
-		authorId, err = strconv.ParseInt(authorIdStr, 10, 64)
-	}
 
-	var info service.UserInfo
-	info, err = ctl.userSrv.GetInfo(authorId, userId)
+func (ctl *UserController) GetUserInfo(ctx *gin.Context) {
+	var userId uint64
+	var err error
+	userId = ctx.GetUint64("user_id")
+	// targetIdStr := ctx.Query("user_id")
+	// if targetIdStr == "" {
+	// 	targetId = userId
+	// } else {
+	// 	targetId, err = strconv.ParseUint(targetIdStr, 10, 64)
+	// }
+
+	// info, err := ctl.userSrv.GetInfo(targetId, userId)
+	info, err := ctl.userSrv.GetInfo(userId, userId)
 	if err != nil {
 		ue := util.ConvertOrLog(err)
 		ctx.JSON(http.StatusOK, AuthResp{
@@ -99,8 +115,9 @@ func (ctl *UserController) GetUserInfo(ctx *gin.Context) {
 		})
 		return
 	}
+
 	ctx.JSON(http.StatusOK, UserInfoResp{
 		response: respOk,
-		User:     info,
+		User:     *info,
 	})
 }

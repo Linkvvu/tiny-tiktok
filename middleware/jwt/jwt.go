@@ -32,7 +32,7 @@ func AuthorizationMiddleware(ctx *gin.Context) {
 	if token == "" {
 		ctx.JSON(http.StatusUnauthorized, gin.H{
 			"status_code": 404,
-			"status_msg":  "账号或密码错误，请检查您的账号密码",
+			"status_msg":  "请先登录",
 		})
 		ctx.Abort()
 		return
@@ -42,13 +42,13 @@ func AuthorizationMiddleware(ctx *gin.Context) {
 	if err != nil {
 		ctx.JSON(http.StatusUnauthorized, gin.H{
 			"status_code": 404,
-			"status_msg":  "账号或密码错误，请检查您的账号密码",
+			"status_msg":  "账号状态异常，请重新登录",
 		})
 		ctx.Abort()
 		return
 	}
 
-	user_id, _ := strconv.ParseInt(claim.UserId, 10, 64)
+	user_id, _ := strconv.ParseUint(claim.UserId, 10, 64)
 	ctx.Set("user_id", user_id)
 	ctx.Next()
 }

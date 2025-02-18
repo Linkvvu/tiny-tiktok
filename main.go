@@ -9,7 +9,6 @@ import (
 func main() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
 	initControllers()
-	defer destroyControllers()
 
 	eng := gin.Default()
 	setRoutes(eng)

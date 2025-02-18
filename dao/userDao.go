@@ -5,9 +5,12 @@ import (
 )
 
 type User struct {
-	Id       int64
-	Username string
-	Password string
+	Id               uint64
+	Username         string
+	Password         string
+	Nickname         string
+	AvatarUrl        string
+	BackgroundImgUrl string
 }
 
 func GetUserList() (users []User, err error) {
@@ -18,7 +21,7 @@ func GetUserList() (users []User, err error) {
 	return
 }
 
-func GetUserById(id int64) (User, error) {
+func GetUserById(id uint64) (User, error) {
 	u := User{Id: id}
 	err := Db.First(&u).Error
 	return u, err
