@@ -3,13 +3,14 @@ package dao
 import "time"
 
 type Video struct {
-	Id        uint64
-	AuthorId  uint64
-	Title     string
-	PlayUrl   string
-	CoverUrl  string
-	PublishAt time.Time
-	LikeCount uint64
+	Id           uint64
+	AuthorId     uint64
+	Title        string
+	PlayUrl      string
+	CoverUrl     string
+	PublishAt    time.Time
+	LikeCount    uint64
+	CommentCount uint64
 }
 
 func PersistVideo(video *Video) error {

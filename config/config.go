@@ -1,4 +1,4 @@
-package util
+package config
 
 const (
 	AmqpUri       = "amqp://localhost:5672"

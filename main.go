@@ -10,6 +10,7 @@ func main() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
 	initControllers()
 
+	gin.SetMode(gin.ReleaseMode)
 	eng := gin.Default()
 	setRoutes(eng)
 	eng.Run(":8080")

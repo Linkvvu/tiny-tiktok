@@ -2,9 +2,8 @@ package impl
 
 import (
 	"fmt"
-	"log"
 	"tiktok/middleware/cache"
-	"tiktok/util"
+	"tiktok/pkg"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -52,7 +51,7 @@ func (s *LikeServiceImpl) handleLikeAction(user_id, video_id uint64, action int8
 		res, err := luaScript.Run(
 			cache.Ctx, cache.Rdb,
 			[]string{userLikedVideosKey, videoInfoKey, likeMqKey},
-			action, video_id, user_id, encodeLikeMqCmd(user_id, video_id, action),
+			action, video_id, user_id, encodeLikeMqMsg(user_id, video_id, action),
 		).Int()
 
 		if err != nil {
@@ -63,8 +62,7 @@ func (s *LikeServiceImpl) handleLikeAction(user_id, video_id uint64, action int8
 
 	res, err := updateCache()
 	if err != nil {
-		log.Println(err)
-		return util.ErrInternalService
+		return pkg.NewError(pkg.ErrInternal, err)
 	}
 
 	// 检查用户点赞状态
@@ -74,17 +72,17 @@ func (s *LikeServiceImpl) handleLikeAction(user_id, video_id uint64, action int8
 		}
 		res, err := updateCache()
 		if err != nil {
-			log.Println(err)
-			return util.ErrInternalService
+			return pkg.NewError(pkg.ErrInternal, err)
 		}
+
 		if res == 1 {
-			fmt.Printf("ERROR: unexpected case, failed to load new video to cache, detail: %v", err)
-			return util.ErrInternalService
+			err = fmt.Errorf("unexpected case, failed to load new video to cache, detail: %w", err)
+			return pkg.NewError(pkg.ErrInternal, err)
 		} else if res == 2 {
-			return util.ErrInvalidParam
+			return pkg.NewError(pkg.ErrValidation, nil)
 		}
 	} else if res == 2 {
-		return util.ErrInvalidParam
+		return pkg.NewError(pkg.ErrValidation, nil)
 	}
 
 	return nil
@@ -101,8 +99,8 @@ func (s *LikeServiceImpl) CancelLike(user_id, video_id uint64) error {
 func (s *LikeServiceImpl) LikeCount(video_id uint64) (uint64, error) {
 	videoModel, err := getVideoModelFromCache(video_id)
 	if err != nil {
-		log.Printf("failed to get video model from cache, detail: %v", err)
-		return 0, util.ErrInternalService
+		err = fmt.Errorf("failed to get video model from cache, detail: %w", err)
+		return 0, pkg.NewError(pkg.ErrInternal, err)
 	}
 	return videoModel.LikeCount, nil
 }
@@ -111,8 +109,8 @@ func (s *LikeServiceImpl) HasUserLiked(video_id, user_id uint64) (bool, error) {
 	key := fmtUserLikedVideosKey(user_id)
 	exist, err := cache.Rdb.Exists(cache.Ctx, key).Result()
 	if err != nil {
-		log.Printf("failed to execute EXISTS within redis, detail: %v", err)
-		return false, util.ErrInternalService
+		err = fmt.Errorf("failed to execute EXISTS within redis, detail: %w", err)
+		return false, pkg.NewError(pkg.ErrInternal, err)
 	}
 
 	if exist == 0 {
@@ -123,8 +121,8 @@ func (s *LikeServiceImpl) HasUserLiked(video_id, user_id uint64) (bool, error) {
 	}
 	liked, err := cache.Rdb.SIsMember(cache.Ctx, key, interface{}(video_id)).Result()
 	if err != nil {
-		log.Printf("failed to execute SIsMember within redis, detail: %v", err)
-		return false, util.ErrInternalService
+		err = fmt.Errorf("failed to execute SIsMember within redis, detail: %v", err)
+		return false, pkg.NewError(pkg.ErrInternal, err)
 	}
 	return liked, nil
 }

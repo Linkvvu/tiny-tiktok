@@ -5,24 +5,29 @@ import (
 	"net/http"
 	"strconv"
 	"tiktok/middleware/jwt"
+	"tiktok/pkg"
 	vSrv "tiktok/service/video"
-	"tiktok/util"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
-type DoCommentReq struct {
+type MakeCommentReq struct {
 	Content string `json:"content"`
 }
 
+type MakeCOmmentResp struct {
+	pkg.Response
+	Comment vSrv.CommentInfo `json:"comment"`
+}
+
 type VideosResp struct {
-	response
+	pkg.Response
 	Videos []vSrv.VideoInfo `json:"video_list"`
 }
 
 type CommentResp struct {
-	response
+	pkg.Response
 	Comments []vSrv.CommentInfo `json:"comment_list"`
 }
 
@@ -43,13 +48,13 @@ func (ctl *VideoController) Publish(ctx *gin.Context) {
 	var videoFH, thumbnailFH *multipart.FileHeader
 	videoFH, err = ctx.FormFile("video")
 	if err != nil {
-		ctx.JSON(http.StatusOK, NewErrResponse(util.ErrInvalidParam))
+		ctx.AbortWithError(http.StatusBadRequest, pkg.NewError(pkg.ErrValidation, err))
 		return
 	}
 
 	thumbnailFH, err = ctx.FormFile("thumbnail")
 	if err != nil {
-		ctx.JSON(http.StatusOK, NewErrResponse(util.ErrInvalidParam))
+		ctx.AbortWithError(http.StatusBadRequest, pkg.NewError(pkg.ErrValidation, err))
 		return
 	}
 
@@ -60,12 +65,12 @@ func (ctl *VideoController) Publish(ctx *gin.Context) {
 
 	err = ctl.videoSrv.Publish(userId, title, videoFile, thumbnailFile)
 	if err != nil {
-		ue := util.ConvertOrLog(err)
-		ctx.JSON(http.StatusOK, NewErrResponse(ue))
+		ctx.Error(err)
+		ctx.Abort()
 		return
 	}
 
-	ctx.JSON(http.StatusOK, NewErrResponse(util.ErrOk))
+	ctx.JSON(http.StatusOK, pkg.NewOkResp())
 }
 
 func (ctl *VideoController) ListUserPubVideos(ctx *gin.Context) {
@@ -73,12 +78,12 @@ func (ctl *VideoController) ListUserPubVideos(ctx *gin.Context) {
 	user_id := ctx.GetUint64("user_id")
 	video_infos, err := ctl.videoSrv.ListUserPubVideos(author_id, user_id)
 	if err != nil {
-		ue := util.ConvertOrLog(err)
-		ctx.JSON(http.StatusOK, NewErrResponse(ue))
+		ctx.Error(err)
+		ctx.Abort()
 		return
 	}
 	ctx.JSON(http.StatusOK, VideosResp{
-		response: NewErrResponse(util.ErrOk),
+		Response: pkg.NewOkResp(),
 		Videos:   video_infos,
 	})
 }
@@ -88,12 +93,12 @@ func (ctl *VideoController) ListUserLikedVideos(ctx *gin.Context) {
 	user_id := ctx.GetUint64("user_id")
 	videos, err := ctl.videoSrv.ListUserLikedVideos(author_id, user_id)
 	if err != nil {
-		ue := util.ConvertOrLog(err)
-		ctx.JSON(http.StatusOK, NewErrResponse(ue))
+		ctx.Error(err)
+		ctx.Abort()
 		return
 	}
 	ctx.JSON(http.StatusOK, VideosResp{
-		response: NewErrResponse(util.ErrOk),
+		Response: pkg.NewOkResp(),
 		Videos:   videos,
 	})
 }
@@ -105,7 +110,7 @@ func (ctl *VideoController) Feed(ctx *gin.Context) {
 	if token != "" {
 		claim, err := jwt.ParsingToken(token)
 		if err != nil {
-			ctx.JSON(http.StatusUnauthorized, NewErrResponse(util.ErrInvalidJwtStatus))
+			ctx.AbortWithError(http.StatusUnauthorized, pkg.NewError(pkg.ErrAuthException, err))
 			return
 		}
 
@@ -119,7 +124,7 @@ func (ctl *VideoController) Feed(ctx *gin.Context) {
 	if time_str != "" {
 		timestamp, err := strconv.ParseInt(time_str, 10, 64)
 		if err != nil {
-			ctx.JSON(http.StatusBadRequest, NewErrResponse(util.ErrInvalidParam))
+			ctx.AbortWithError(http.StatusBadRequest, pkg.NewError(pkg.ErrValidation, err))
 			return
 		}
 		latest_time = new(time.Time)
@@ -128,12 +133,12 @@ func (ctl *VideoController) Feed(ctx *gin.Context) {
 
 	video_infos, err := ctl.videoSrv.Feed(user_id, latest_time)
 	if err != nil {
-		ue := util.ConvertOrLog(err)
-		ctx.JSON(http.StatusOK, NewErrResponse(ue))
+		ctx.Error(err)
+		ctx.Abort()
 		return
 	}
 	ctx.JSON(http.StatusOK, VideosResp{
-		response: NewErrResponse(util.ErrOk),
+		Response: pkg.NewOkResp(),
 		Videos:   video_infos,
 	})
 }
@@ -143,12 +148,12 @@ func (ctl *VideoController) Like(ctx *gin.Context) {
 	video_id, _ := strconv.ParseUint(ctx.Param("video_id"), 10, 64)
 	err := ctl.videoSrv.DoLike(user_id, video_id)
 	if err != nil {
-		ue := util.ConvertOrLog(err)
-		ctx.JSON(http.StatusOK, NewErrResponse(ue))
+		ctx.Error(err)
+		ctx.Abort()
 		return
 	}
 
-	ctx.JSON(http.StatusOK, NewErrResponse(util.ErrOk))
+	ctx.JSON(http.StatusOK, pkg.NewOkResp())
 }
 
 func (ctl *VideoController) Unlike(ctx *gin.Context) {
@@ -156,35 +161,37 @@ func (ctl *VideoController) Unlike(ctx *gin.Context) {
 	video_id, _ := strconv.ParseUint(ctx.Param("video_id"), 10, 64)
 	err := ctl.videoSrv.CancelLike(user_id, video_id)
 	if err != nil {
-		ue := util.ConvertOrLog(err)
-		ctx.JSON(http.StatusOK, NewErrResponse(ue))
+		ctx.Error(err)
+		ctx.Abort()
 		return
 	}
 
-	ctx.JSON(http.StatusOK, NewErrResponse(util.ErrOk))
+	ctx.JSON(http.StatusOK, pkg.NewOkResp())
 }
 
 func (ctl *VideoController) DoComment(ctx *gin.Context) {
 	userId := ctx.GetUint64("user_id")
 	videoId, _ := strconv.ParseInt(ctx.Param("video_id"), 10, 64)
 	parentId, _ := strconv.ParseInt(ctx.Param("parent_id"), 10, 64)
-	req := DoCommentReq{}
+	req := MakeCommentReq{}
 	err := ctx.ShouldBindJSON(&req)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, AuthResp{
-			response: NewErrResponse(util.ErrInvalidParam),
-		})
+		ctx.Error(pkg.NewError(pkg.ErrValidation, err))
+		ctx.Abort()
 		return
 	}
 
-	err = ctl.videoSrv.DoComment(videoId, int64(userId), parentId, req.Content)
+	commentInfo, err := ctl.videoSrv.MakeComment(videoId, int64(userId), parentId, req.Content)
 	if err != nil {
-		ue := util.ConvertOrLog(err)
-		ctx.JSON(http.StatusOK, NewErrResponse(ue))
+		ctx.Error(err)
+		ctx.Abort()
 		return
 	}
 
-	ctx.JSON(http.StatusOK, NewErrResponse(util.ErrOk))
+	ctx.JSON(http.StatusOK, MakeCOmmentResp{
+		Response: pkg.NewOkResp(),
+		Comment:  *commentInfo,
+	})
 }
 
 func (ctl *VideoController) DeleteComment(ctx *gin.Context) {
@@ -194,12 +201,12 @@ func (ctl *VideoController) DeleteComment(ctx *gin.Context) {
 
 	err := ctl.videoSrv.DeleteComment(videoId, commId, userId)
 	if err != nil {
-		ue := util.ConvertOrLog(err)
-		ctx.JSON(http.StatusOK, NewErrResponse(ue))
+		ctx.Error(err)
+		ctx.Abort()
 		return
 	}
 
-	ctx.JSON(http.StatusOK, NewErrResponse(util.ErrOk))
+	ctx.JSON(http.StatusOK, pkg.NewOkResp())
 }
 
 func (ctl *VideoController) ListVideoComments(ctx *gin.Context) {
@@ -208,7 +215,7 @@ func (ctl *VideoController) ListVideoComments(ctx *gin.Context) {
 	if token != "" {
 		claim, err := jwt.ParsingToken(token)
 		if err != nil {
-			ctx.JSON(http.StatusUnauthorized, NewErrResponse(util.ErrInvalidJwtStatus))
+			ctx.AbortWithError(http.StatusUnauthorized, pkg.NewError(pkg.ErrAuthException, err))
 			return
 		}
 
@@ -219,12 +226,12 @@ func (ctl *VideoController) ListVideoComments(ctx *gin.Context) {
 	video_id, _ := strconv.ParseUint(ctx.Param("video_id"), 10, 64)
 	commInfos, err := ctl.videoSrv.ListVideoComments(int64(video_id), userId)
 	if err != nil {
-		ue := util.ConvertOrLog(err)
-		ctx.JSON(http.StatusOK, NewErrResponse(ue))
+		ctx.Error(err)
+		ctx.Abort()
 		return
 	}
 	ctx.JSON(http.StatusOK, CommentResp{
-		response: NewErrResponse(util.ErrOk),
+		Response: pkg.NewOkResp(),
 		Comments: commInfos,
 	})
 }

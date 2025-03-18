@@ -1,15 +1,18 @@
 package service
 
+type UserService interface {
+	RelService
+	Register(username, password string) (*AuthInfo, error)
+	Login(username, password string) (*AuthInfo, error)
+	GetUserInfo(targetUserId, curUserId uint64) (*UserInfo, error)
+	GetAllFollowed(targetId, userId int64) ([]UserInfo, error)
+	GetAllFollower(targetId, userId int64) ([]UserInfo, error)
+}
+
 type AuthInfo struct {
 	Id       uint64 // user id
 	Username string // username
 	Token    string // token
-}
-
-type UserService interface {
-	Register(username, password string) (*AuthInfo, error)
-	Login(username, password string) (*AuthInfo, error)
-	GetInfo(targetUserId, curUserId uint64) (*UserInfo, error)
 }
 
 type UserInfo struct {

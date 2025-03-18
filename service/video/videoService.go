@@ -18,14 +18,6 @@ type VideoInfo struct {
 	PublishAt  string        `json:"publish_at"`
 }
 
-type CommentInfo struct {
-	Id        int64         `json:"id"`
-	Commenter uSrv.UserInfo `json:"commenter"`
-	ParentId  int64         `json:"parent_id"`
-	Content   string        `json:"content"`
-	CreateAt  time.Time     `json:"create_time"`
-}
-
 type VideoService interface {
 	LikeService
 	CommentService
@@ -34,4 +26,5 @@ type VideoService interface {
 	ListUserLikedVideos(targetId, userId uint64) ([]VideoInfo, error)
 	ListVideoComments(videoId, userId int64) ([]CommentInfo, error)
 	Feed(userId uint64, latestTime *time.Time) ([]VideoInfo, error)
+	MakeComment(videoId, userId, parentId int64, content string) (*CommentInfo, error)
 }

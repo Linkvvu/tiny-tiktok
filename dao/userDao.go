@@ -5,12 +5,12 @@ import (
 )
 
 type User struct {
-	Id               uint64
-	Username         string
-	Password         string
-	Nickname         string
-	AvatarUrl        string
-	BackgroundImgUrl string
+	Id               uint64 `redis:"id"`
+	Username         string `redis:"username"`
+	Password         string `redis:"password"`
+	Nickname         string `redis:"nickname"`
+	AvatarUrl        string `redis:"avatar_url"`
+	BackgroundImgUrl string `redis:"background_url"`
 }
 
 func GetUserList() (users []User, err error) {

@@ -3,12 +3,15 @@ package cache
 import (
 	"context"
 	"log"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
 var Rdb *redis.Client
 var Ctx context.Context = context.TODO()
+
+const NullValTimeout = time.Second * 30
 
 func init() {
 	Rdb = redis.NewClient(&redis.Options{

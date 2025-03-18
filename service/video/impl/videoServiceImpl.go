@@ -3,15 +3,14 @@ package impl
 import (
 	"fmt"
 	"io"
-	"log"
 	"strconv"
 	"sync"
 	"tiktok/dao"
 	"tiktok/middleware/cache"
 	"tiktok/middleware/oss"
+	"tiktok/pkg"
 	uSrv "tiktok/service/user"
 	vSrv "tiktok/service/video"
-	"tiktok/util"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,6 +33,7 @@ func NewVideoService(userSrv uSrv.UserService, likeSrv vSrv.LikeService, commSrv
 	}
 }
 
+// TODO: don't HMSET, lazy load
 func (s *VideoServiceImpl) Publish(userId uint64, title string, video, thumbnail io.Reader) error {
 	// Uploads to OSS
 	uuid := uuid.New()
@@ -52,9 +52,7 @@ func (s *VideoServiceImpl) Publish(userId uint64, title string, video, thumbnail
 
 	err := dao.PersistVideo(&videoModel)
 	if err != nil {
-		log.Println(err.Error())
-		err = fmt.Errorf("%w, %w", util.ErrInternalService, err)
-		return err
+		return pkg.NewError(pkg.ErrInternal, err)
 	}
 
 	// Updates cache
@@ -70,16 +68,18 @@ func (s *VideoServiceImpl) Publish(userId uint64, title string, video, thumbnail
 		local play_url = ARGV[4]
 		local cover_url = ARGV[5]
 		local like_count = ARGV[6]
-		local publish_at = ARGV[7]
+		local comment_count = ARGV[7]
+		local publish_at = ARGV[8]
 		
 		if redis.call("EXISTS", user_videos_key) == 1 then
 			redis.call("HMSET", video_model_key,
-				"video_id", vid, 
+				"id", vid, 
 				"author_id", author_id,
 				"title", title,
 				"play_url", play_url, 
 				"cover_url", cover_url, 
 				"like_count", like_count, 
+				"comment_count", comment_count, 
 				"publish_at", publish_at
 			)
 			redis.call("ZADD", user_videos_key, publish_at, vid)
@@ -101,6 +101,7 @@ func (s *VideoServiceImpl) Publish(userId uint64, title string, video, thumbnail
 			videoModel.PlayUrl,
 			videoModel.CoverUrl,
 			videoModel.LikeCount,
+			videoModel.CommentCount,
 			videoModel.PublishAt.UnixMilli(),
 		).Int()
 		if err != nil {
@@ -111,8 +112,7 @@ func (s *VideoServiceImpl) Publish(userId uint64, title string, video, thumbnail
 
 	res, err := updateCache()
 	if err != nil {
-		log.Println(err)
-		return util.ErrInternalService
+		return pkg.NewError(pkg.ErrInternal, err)
 	}
 
 	if res == 1 { // user_videos key isn't exists
@@ -121,12 +121,12 @@ func (s *VideoServiceImpl) Publish(userId uint64, title string, video, thumbnail
 		}
 		res, err := updateCache()
 		if err != nil {
-			log.Println(err)
-			return util.ErrInternalService
+			return pkg.NewError(pkg.ErrInternal, err)
 		}
+
 		if res == 1 {
-			fmt.Printf("ERROR: unexpected case, failed to load new video to cache, detail: %v", err)
-			return util.ErrInternalService
+			err = fmt.Errorf("ERROR: unexpected case, failed to load new video to cache, detail: %w", err)
+			return pkg.NewError(pkg.ErrInternal, err)
 		}
 	}
 	return nil
@@ -143,8 +143,8 @@ func (s *VideoServiceImpl) doUpload(name string, video, thumbnail io.Reader) err
 
 	err = oss.StoreObject(videoObj)
 	if err != nil {
-		log.Printf("failed to upload to OSS, detail: %s", err)
-		return util.ErrInternalService
+		err = fmt.Errorf("failed to upload to OSS, detail: %w", err)
+		return pkg.NewError(pkg.ErrInternal, err)
 	}
 
 	thumbnailObj := oss.OssObject{
@@ -155,8 +155,8 @@ func (s *VideoServiceImpl) doUpload(name string, video, thumbnail io.Reader) err
 
 	err = oss.StoreObject(thumbnailObj)
 	if err != nil {
-		log.Printf("failed to upload to OSS, detail: %s", err)
-		return util.ErrInternalService
+		err = fmt.Errorf("failed to upload to OSS, detail: %w", err)
+		return pkg.NewError(pkg.ErrInternal, err)
 	}
 	return nil
 }
@@ -169,6 +169,22 @@ func (s *VideoServiceImpl) doUpload(name string, video, thumbnail io.Reader) err
 func (s *VideoServiceImpl) buildVideoInfo(videoModel dao.Video, userId uint64) vSrv.VideoInfo {
 	var isLiked bool
 	var authorInfo *uSrv.UserInfo
+	// 游客仅需获取作者信息
+	if userId == 0 {
+		isLiked = false
+		authorInfo, _ = s.UserSrv.GetUserInfo(videoModel.AuthorId, userId)
+		return vSrv.VideoInfo{
+			Id:         videoModel.Id,
+			Author:     *authorInfo,
+			PlayUrl:    videoModel.PlayUrl,
+			CoverUrl:   videoModel.CoverUrl,
+			Title:      videoModel.Title,
+			LikeCnt:    videoModel.LikeCount,
+			CommentCnt: videoModel.CommentCount,
+			IsLike:     isLiked,
+			PublishAt:  strconv.FormatInt(videoModel.PublishAt.UnixMilli(), 10),
+		}
+	}
 
 	grp := sync.WaitGroup{}
 	grp.Add(2)
@@ -179,7 +195,7 @@ func (s *VideoServiceImpl) buildVideoInfo(videoModel dao.Video, userId uint64) v
 
 	go func() {
 		defer grp.Done()
-		authorInfo, _ = s.UserSrv.GetInfo(videoModel.AuthorId, userId)
+		authorInfo, _ = s.UserSrv.GetUserInfo(videoModel.AuthorId, userId)
 	}()
 	grp.Wait()
 
@@ -190,7 +206,7 @@ func (s *VideoServiceImpl) buildVideoInfo(videoModel dao.Video, userId uint64) v
 		CoverUrl:   videoModel.CoverUrl,
 		Title:      videoModel.Title,
 		LikeCnt:    videoModel.LikeCount,
-		CommentCnt: 199232,
+		CommentCnt: videoModel.CommentCount,
 		IsLike:     isLiked,
 		PublishAt:  strconv.FormatInt(videoModel.PublishAt.UnixMilli(), 10),
 	}
@@ -208,13 +224,13 @@ func (s *VideoServiceImpl) ListUserPubVideos(targetId, userId uint64) ([]vSrv.Vi
 
 	videoIds, err := cache.Rdb.ZRevRange(cache.Ctx, key, 0, -1).Result()
 	if err != nil {
-		log.Printf("failed to retrieve user pub video set, detail: %v", err)
-		return nil, util.ErrInternalService
+		err = fmt.Errorf("failed to retrieve user pub video set, detail: %w", err)
+		return nil, pkg.NewError(pkg.ErrInternal, err)
 	}
 	videoModels, err := s.retrieveVideosFromCacheStr(videoIds)
 	if err != nil {
-		log.Printf("failed to retrieve video info, detail: %v", err)
-		return nil, util.ErrInternalService
+		err = fmt.Errorf("failed to retrieve video info, detail: %w", err)
+		return nil, pkg.NewError(pkg.ErrInternal, err)
 	}
 
 	videosInfos := make([]vSrv.VideoInfo, 0, len(videoModels))
@@ -236,14 +252,14 @@ func (s *VideoServiceImpl) ListUserLikedVideos(targetId, userId uint64) ([]vSrv.
 
 	vids, err := cache.Rdb.SMembers(cache.Ctx, key).Result()
 	if err != nil {
-		log.Printf("failed to retrieve user liked video set, detail: %v", err)
-		return nil, util.ErrInternalService
+		err = fmt.Errorf("failed to retrieve user liked video set, detail: %w", err)
+		return nil, pkg.NewError(pkg.ErrInternal, err)
 	}
 
 	videoModels, err := s.retrieveVideosFromCacheStr(vids)
 	if err != nil {
-		log.Printf("failed to retrieve video info, detail: %v", err)
-		return nil, util.ErrInternalService
+		err = fmt.Errorf("failed to retrieve video info, detail: %w", err)
+		return nil, pkg.NewError(pkg.ErrInternal, err)
 	}
 	videosInfos := make([]vSrv.VideoInfo, 0, len(videoModels))
 	for _, v := range videoModels {
@@ -266,8 +282,8 @@ func (s *VideoServiceImpl) Feed(userId uint64, latestTime *time.Time) ([]vSrv.Vi
 		Count: 5,
 	}).Result()
 	if err != nil {
-		log.Printf("WARN: failed to feed, detail: %v", err)
-		return nil, util.ErrInternalService
+		err = fmt.Errorf("WARN: failed to feed, detail: %w", err)
+		return nil, pkg.NewError(pkg.ErrInternal, err)
 	}
 
 	videoModels, err := s.retrieveVideosFromCacheStr(vidStr)
@@ -283,7 +299,7 @@ func (s *VideoServiceImpl) Feed(userId uint64, latestTime *time.Time) ([]vSrv.Vi
 }
 
 func (s *VideoServiceImpl) buildCommentInfo(model dao.Comment, userId int64) vSrv.CommentInfo {
-	userInfo, _ := s.UserSrv.GetInfo(uint64(model.UserId), uint64(userId))
+	userInfo, _ := s.UserSrv.GetUserInfo(uint64(model.UserId), uint64(userId))
 	return vSrv.CommentInfo{
 		Id:        model.Id,
 		Commenter: *userInfo,
@@ -330,4 +346,13 @@ func (s *VideoServiceImpl) retrieveVideosFromCache(vids []uint64) ([]dao.Video, 
 		videos = append(videos, model)
 	}
 	return videos, nil
+}
+
+func (s *VideoServiceImpl) MakeComment(videoId, userId, parentId int64, content string) (*vSrv.CommentInfo, error) {
+	model, err := s.DoComment(videoId, userId, parentId, content)
+	if err != nil {
+		return nil, err
+	}
+	commentInfo := s.buildCommentInfo(*model, userId)
+	return &commentInfo, nil
 }

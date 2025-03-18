@@ -1,10 +1,11 @@
 package jwt
 
 import (
+	"errors"
 	"fmt"
-	"net/http"
 	"strconv"
-	"tiktok/util"
+	"tiktok/config"
+	"tiktok/pkg"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -27,24 +28,23 @@ func getToken(ctx *gin.Context) (token string) {
 	return
 }
 
-func AuthorizationMiddleware(ctx *gin.Context) {
+func AuthorizationHandler(ctx *gin.Context) {
 	token := getToken(ctx)
+	var appE *pkg.AppError
 	if token == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{
-			"status_code": 404,
-			"status_msg":  "请先登录",
-		})
-		ctx.Abort()
+		appE = pkg.NewError(pkg.ErrValidation, fmt.Errorf("login first please!"))
+		ctx.AbortWithError(appE.HttpStatus, appE)
 		return
 	}
 
 	claim, err := ParsingToken(token)
 	if err != nil {
-		ctx.JSON(http.StatusUnauthorized, gin.H{
-			"status_code": 404,
-			"status_msg":  "账号状态异常，请重新登录",
-		})
-		ctx.Abort()
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			appE = pkg.NewError(pkg.ErrAuthException, err)
+		} else {
+			appE = pkg.NewError(pkg.ErrUnmatchedPwd, err)
+		}
+		ctx.AbortWithError(appE.HttpStatus, appE)
 		return
 	}
 
@@ -63,7 +63,7 @@ func NewToken(user_id string) (string, error) {
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claim)
-	str, err := token.SignedString([]byte(util.JwtSecret))
+	str, err := token.SignedString([]byte(config.JwtSecret))
 	if err != nil {
 		return "", err
 	}
@@ -74,12 +74,12 @@ func ParsingToken(token string) (TiktokClaim, error) {
 	claims := &TiktokClaim{}
 	_, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, util.ErrInvalidJwtStatus
+			return nil, jwt.ErrSignatureInvalid
 		}
 		return []byte(jwt_secret), nil
 	})
 	if err != nil {
-		return TiktokClaim{}, fmt.Errorf("%w: %w", util.ErrInvalidJwtStatus, err)
+		return TiktokClaim{}, err
 	}
 	return *claims, nil
 }

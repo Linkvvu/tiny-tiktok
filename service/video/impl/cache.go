@@ -7,14 +7,12 @@ import (
 	"strconv"
 	"tiktok/dao"
 	"tiktok/middleware/cache"
-	"tiktok/util"
+	"tiktok/pkg"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
-
-const nullValTimeout = time.Second * 30
 
 func fmtVideoModelKey(vid uint64) string {
 	return fmt.Sprintf("video_model:%d", vid)
@@ -45,16 +43,18 @@ func getVideoModelFromCache(videoId uint64) (dao.Video, error) {
 	id, _ := strconv.ParseUint(values["id"], 10, 64)
 	authorId, _ := strconv.ParseUint(values["author_id"], 10, 64)
 	likeCount, _ := strconv.ParseUint(values["like_count"], 10, 64)
+	CommentCount, _ := strconv.ParseUint(values["comment_count"], 10, 64)
 	publishAt, _ := strconv.ParseInt(values["publish_at"], 10, 64)
 
 	return dao.Video{
-		Id:        id,
-		AuthorId:  authorId,
-		Title:     values["title"],
-		PlayUrl:   values["play_url"],
-		CoverUrl:  values["cover_url"],
-		LikeCount: likeCount,
-		PublishAt: time.Unix(publishAt, 0),
+		Id:           id,
+		AuthorId:     authorId,
+		Title:        values["title"],
+		PlayUrl:      values["play_url"],
+		CoverUrl:     values["cover_url"],
+		LikeCount:    likeCount,
+		CommentCount: CommentCount,
+		PublishAt:    time.UnixMilli(publishAt),
 	}, nil
 }
 
@@ -67,28 +67,29 @@ func setVideoModelToCache(v dao.Video) error {
 		"play_url":      v.PlayUrl,
 		"cover_url":     v.CoverUrl,
 		"like_count":    v.LikeCount,
-		"comment_count": v.LikeCount,
+		"comment_count": v.CommentCount,
 		"publish_at":    v.PublishAt.UnixMilli(),
 	}
 	return cache.Rdb.HSet(cache.Ctx, key, values).Err()
 }
 
-func encodeLikeMqCmd(user_id, video_id uint64, action int8) string {
+func encodeLikeMqMsg(user_id, video_id uint64, action int8) string {
 	return fmt.Sprintf("%d:%d:%d", user_id, video_id, action)
 }
 
-func decodeLikeMqCmd(cmd string) (user_id, video_id uint64, action int8) {
+func decodeLikeMqMsg(cmd string) (user_id, video_id uint64, action int8) {
 	fmt.Sscanf(cmd, "%d:%d:%d", &user_id, &video_id, &action)
 	return
 }
 
+// todo: use transaction
 func likeMqConsumer() {
 	sub := cache.Rdb.Subscribe(cache.Ctx, getLikeMqKey())
 	defer sub.Close()
 	likeChan := sub.Channel()
 	for msg := range likeChan {
 		cmd := msg.Payload
-		uid, vid, act := decodeLikeMqCmd(cmd)
+		uid, vid, act := decodeLikeMqMsg(cmd)
 		var incr int
 		if act == 0 {
 			incr = -1
@@ -121,40 +122,40 @@ func cacheUserPubVideos(uid uint64) error {
 	lockKey := fmt.Sprintf("lock:%s", key)
 	locked, err := cache.Rdb.SetNX(cache.Ctx, lockKey, 1, 10*time.Second).Result()
 	if err != nil {
-		return fmt.Errorf("%w: failed to get lock - %w", util.ErrInternalService, err)
+		err = fmt.Errorf("failed to get lock, key=%s - %w", lockKey, err)
+		return pkg.NewError(pkg.ErrInternal, err)
 	}
 
-	if locked {
-		defer func() {
-			cache.Rdb.Del(cache.Ctx, lockKey)
-		}()
-
-		videoModels, err := dao.GetVideosByAuthor(uid)
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("%w: failed to get videos by user id %d - %w", util.ErrInternalService, uid, err)
-		}
-
-		for _, v := range videoModels {
-			zData := redis.Z{
-				Score:  float64(v.PublishAt.Unix()),
-				Member: v.Id,
-			}
-			err := cache.Rdb.ZAdd(cache.Ctx, key, zData).Err()
-			if err != nil {
-				log.Printf("WARN: video-%d cache failed, skipped\n", v.Id)
-				continue
-			}
-		}
-
-		// placeholder
-		cache.Rdb.ZAdd(cache.Ctx, key, redis.Z{
-			Score:  0,
-			Member: "",
-		})
-		cache.Rdb.Expire(cache.Ctx, key, 10*time.Minute)
-	} else {
-		return util.ErrRetry
+	if !locked {
+		return pkg.NewError(pkg.ErrRetry, nil)
 	}
+
+	defer cache.Rdb.Del(cache.Ctx, lockKey)
+
+	videoModels, err := dao.GetVideosByAuthor(uid)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		err = fmt.Errorf("failed to get videos by user id=%d - %w", uid, err)
+		return pkg.NewError(pkg.ErrInternal, err)
+	}
+
+	for _, v := range videoModels {
+		zData := redis.Z{
+			Score:  float64(v.PublishAt.UnixMilli()),
+			Member: v.Id,
+		}
+		err := cache.Rdb.ZAdd(cache.Ctx, key, zData).Err()
+		if err != nil {
+			log.Printf("WARN: video-%d cache failed, skipped\n", v.Id)
+			continue
+		}
+	}
+
+	// placeholder
+	cache.Rdb.ZAdd(cache.Ctx, key, redis.Z{
+		Score:  0,
+		Member: "",
+	})
+	cache.Rdb.Expire(cache.Ctx, key, 10*time.Minute)
 	return nil
 }
 
@@ -163,39 +164,39 @@ func cacheUserLikedVideos(uid uint64) error {
 	lockKey := fmt.Sprintf("lock:%s", key)
 	locked, err := cache.Rdb.SetNX(cache.Ctx, lockKey, 1, 10*time.Second).Result()
 	if err != nil {
-		return fmt.Errorf("%w: failed to get lock - %w", util.ErrInternalService, err)
+		err = fmt.Errorf("failed to get lock, key=%s - %w", lockKey, err)
+		return pkg.NewError(pkg.ErrInternal, err)
 	}
 
-	if locked {
-		defer func() {
-			cache.Rdb.Del(cache.Ctx, lockKey)
-		}()
-
-		vids, err := dao.GetLikedVideoIds(uid)
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("%w: failed to get liked video ids by user id %d - %w", util.ErrInternalService, uid, err)
-		}
-		for _, v := range vids {
-			err := cache.Rdb.SAdd(cache.Ctx, key, interface{}(v)).Err()
-			if err != nil {
-				log.Printf("WARN: video-%d cache failed, skipped\n", v)
-				continue
-			}
-		}
-
-		// placeholder
-		cache.Rdb.SAdd(cache.Ctx, key, "")
-		cache.Rdb.Expire(cache.Ctx, key, 10*time.Minute)
-	} else {
-		return util.ErrRetry
+	if !locked {
+		return pkg.NewError(pkg.ErrRetry, nil)
 	}
+
+	defer cache.Rdb.Del(cache.Ctx, lockKey)
+
+	vids, err := dao.GetLikedVideoIds(uid)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		err = fmt.Errorf("failed to get liked video ids by user id=%d - %w", uid, err)
+		return pkg.NewError(pkg.ErrInternal, err)
+	}
+	for _, v := range vids {
+		err := cache.Rdb.SAdd(cache.Ctx, key, interface{}(v)).Err()
+		if err != nil {
+			log.Printf("WARN: video-%d cache failed, skipped\n", v)
+			continue
+		}
+	}
+
+	// placeholder
+	cache.Rdb.SAdd(cache.Ctx, key, "")
+	cache.Rdb.Expire(cache.Ctx, key, 10*time.Minute)
 	return nil
 }
 
 func init() {
 	videoModels := []dao.Video{}
 	err := dao.Db.Find(&videoModels).Error
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err != nil {
 		log.Fatalln("failed to query video records from DB")
 	}
 
